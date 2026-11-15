@@ -1,19 +1,12 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -59,14 +52,9 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -93,6 +81,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
@@ -101,6 +90,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.AppUpdateChannel
 import com.example.data.CalibrationPattern
 import com.example.data.CinemaQuickApp
@@ -228,6 +219,7 @@ fun TvOsHomeScreen(
     onCleanLocalRam: () -> Unit,
     onOpenCalibration: (CalibrationPattern) -> Unit,
     onToggleDefaultLauncher: (Boolean) -> Unit,
+    onOpenHomeSelector: () -> Unit,
     onOpenHiddenSettings: (String, String) -> Unit,
     onOpenTechnicalPage: (MainDestination) -> Unit,
     onDismissAppHub: () -> Unit,
@@ -238,12 +230,20 @@ fun TvOsHomeScreen(
     var activeAppId by remember { mutableStateOf("netflix") }
     var showControlCenter by remember { mutableStateOf(false) }
     var timeString by remember { mutableStateOf("") }
+    var isControlPillFocused by remember { mutableStateOf(false) }
     val initialFocusRequester = remember { FocusRequester() }
 
     if (uiState.showAppHubModal) {
         BackHandler(onBack = onDismissAppHub)
     } else if (showControlCenter) {
         BackHandler { showControlCenter = false }
+    }
+
+    LaunchedEffect(uiState.homeResetNonce) {
+        if (uiState.homeResetNonce > 0) {
+            showControlCenter = false
+            runCatching { initialFocusRequester.requestFocus() }
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -303,11 +303,20 @@ fun TvOsHomeScreen(
 
             Surface(
                 shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.28f),
-                border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.22f)),
+                color = if (isControlPillFocused) {
+                    Color.White.copy(alpha = 0.24f)
+                } else {
+                    Color.Black.copy(alpha = 0.34f)
+                },
+                border = BorderStroke(
+                    width = if (isControlPillFocused) 2.2.dp else 0.8.dp,
+                    color = if (isControlPillFocused) Color.White else Color.White.copy(alpha = 0.24f)
+                ),
                 modifier = Modifier
                     .align(Alignment.TopEnd)
+                    .scale(if (isControlPillFocused) 1.06f else 1.0f)
                     .clip(CircleShape)
+                    .onFocusChanged { isControlPillFocused = it.isFocused }
                     .focusable()
                     .clickable { showControlCenter = true }
                     .testTag("tvos_control_center_trigger")
@@ -320,12 +329,12 @@ fun TvOsHomeScreen(
                     Text(
                         text = timeString.ifBlank { "21:00" },
                         style = MaterialTheme.typography.labelLarge,
-                        color = Color.White.copy(alpha = 0.94f)
+                        color = Color.White
                     )
                     Icon(
                         imageVector = Icons.Default.Tune,
                         contentDescription = "Abrir Central de Controle",
-                        tint = Color.White.copy(alpha = 0.85f),
+                        tint = Color.White,
                         modifier = Modifier.size(15.dp)
                     )
                 }
@@ -472,63 +481,134 @@ fun TvOsHomeScreen(
             }
         }
 
-        // 4. Apple TV App Store & Updates Frosted Modal ("Central de Apps Atualizados")
-        AnimatedVisibility(
-            visible = uiState.showAppHubModal,
-            enter = fadeIn(tween(200)) + scaleIn(initialScale = 0.94f),
-            exit = fadeOut(tween(150)) + scaleOut(targetScale = 0.96f),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            TvOsAppHubDialog(
-                uiState = uiState,
-                onDismiss = onDismissAppHub,
-                onOpenChannel = onOpenUpdateChannel,
-                onCheckPackageUpdate = onCheckPackageUpdate,
-                onOpenNativeAppsSettings = {
-                    onDismissAppHub()
-                    onOpenHiddenSettings(
-                        android.provider.Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS,
-                        "Aplicativos"
-                    )
-                }
-            )
+        // 4. Apple TV App Store & Updates Modal in its own Dialog Window (100% traps D-pad focus!)
+        if (uiState.showAppHubModal) {
+            Dialog(
+                onDismissRequest = onDismissAppHub,
+                properties = DialogProperties(
+                    dismissOnBackPress = true,
+                    dismissOnClickOutside = true,
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false
+                )
+            ) {
+                TvOsAppHubDialog(
+                    uiState = uiState,
+                    onDismiss = onDismissAppHub,
+                    onOpenChannel = { channel ->
+                        onDismissAppHub()
+                        onOpenUpdateChannel(channel)
+                    },
+                    onCheckPackageUpdate = { pkg, title ->
+                        onDismissAppHub()
+                        onCheckPackageUpdate(pkg, title)
+                    },
+                    onOpenNativeAppsSettings = {
+                        onDismissAppHub()
+                        onOpenHiddenSettings(
+                            android.provider.Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS,
+                            "Aplicativos"
+                        )
+                    }
+                )
+            }
         }
 
-        // 5. Apple TV Control Center Slide-Over Sheet
-        AnimatedVisibility(
-            visible = showControlCenter,
-            enter = fadeIn(tween(180)) + slideInHorizontally(initialOffsetX = { it / 2 }),
-            exit = fadeOut(tween(150)) + slideOutHorizontally(targetOffsetX = { it / 2 }),
-            modifier = Modifier.fillMaxSize()
-        ) {
-            TvOsControlCenterDrawer(
-                uiState = uiState,
-                timeString = timeString,
-                onDismiss = { showControlCenter = false },
-                onCleanRam = onCleanLocalRam,
-                onOpenAppHub = {
-                    showControlCenter = false
-                    onLaunchPackage("app.internal.apphub", "App Store")
-                },
-                onOpenFocusPattern = {
-                    showControlCenter = false
-                    onOpenCalibration(CalibrationPattern.FOCUS_KEYSTONE_GRID)
-                },
-                onOpenContrastPattern = {
-                    showControlCenter = false
-                    onOpenCalibration(CalibrationPattern.CONTRAST_PLUGE)
-                },
-                onToggleHomeLauncher = onToggleDefaultLauncher,
-                onOpenAndroidSettings = {
-                    showControlCenter = false
-                    onOpenHiddenSettings(android.provider.Settings.ACTION_SETTINGS, "Configurações")
-                },
-                onOpenTechnicalTools = { dest ->
-                    showControlCenter = false
-                    onOpenTechnicalPage(dest)
-                }
-            )
+        // 5. Apple TV Control Center Drawer in its own Dialog Window (100% traps D-pad focus!)
+        if (showControlCenter) {
+            Dialog(
+                onDismissRequest = { showControlCenter = false },
+                properties = DialogProperties(
+                    dismissOnBackPress = true,
+                    dismissOnClickOutside = true,
+                    usePlatformDefaultWidth = false,
+                    decorFitsSystemWindows = false
+                )
+            ) {
+                TvOsControlCenterDrawer(
+                    uiState = uiState,
+                    timeString = timeString,
+                    onDismiss = { showControlCenter = false },
+                    onCleanRam = onCleanLocalRam,
+                    onOpenAppHub = {
+                        showControlCenter = false
+                        onLaunchPackage("app.internal.apphub", "App Store")
+                    },
+                    onOpenFocusPattern = {
+                        showControlCenter = false
+                        onOpenCalibration(CalibrationPattern.FOCUS_KEYSTONE_GRID)
+                    },
+                    onOpenContrastPattern = {
+                        showControlCenter = false
+                        onOpenCalibration(CalibrationPattern.CONTRAST_PLUGE)
+                    },
+                    onToggleHomeLauncher = onToggleDefaultLauncher,
+                    onOpenHomeSelector = {
+                        showControlCenter = false
+                        onOpenHomeSelector()
+                    },
+                    onOpenAndroidSettings = {
+                        showControlCenter = false
+                        onOpenHiddenSettings(android.provider.Settings.ACTION_SETTINGS, "Configurações")
+                    },
+                    onOpenTechnicalTools = { dest ->
+                        showControlCenter = false
+                        onOpenTechnicalPage(dest)
+                    }
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun TvModalFocusableSurface(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    shape: RoundedCornerShape = RoundedCornerShape(18.dp),
+    unfocusedColor: Color = Color.White.copy(alpha = 0.08f),
+    focusedColor: Color = Color.White.copy(alpha = 0.22f),
+    focusRequester: FocusRequester? = null,
+    content: @Composable (isFocused: Boolean) -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.02f else 1.0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "modalItemScale"
+    )
+
+    val baseMod = if (focusRequester != null) {
+        modifier.focusRequester(focusRequester)
+    } else {
+        modifier
+    }
+
+    Surface(
+        shape = shape,
+        color = if (isFocused) focusedColor else unfocusedColor,
+        border = BorderStroke(
+            width = if (isFocused) 2.5.dp else 1.dp,
+            color = if (isFocused) Color.White else Color.White.copy(alpha = 0.14f)
+        ),
+        modifier = baseMod
+            .scale(scale)
+            .clip(shape)
+            .onFocusChanged { isFocused = it.isFocused }
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyUp &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)
+                ) {
+                    onClick()
+                    true
+                } else {
+                    false
+                }
+            }
+            .focusable()
+            .clickable(onClick = onClick)
+    ) {
+        content(isFocused)
     }
 }
 
@@ -540,11 +620,18 @@ private fun TvOsAppHubDialog(
     onCheckPackageUpdate: (String, String) -> Unit,
     onOpenNativeAppsSettings: () -> Unit
 ) {
+    val firstStoreFocus = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(80)
+        runCatching { firstStoreFocus.requestFocus() }
+    }
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.68f))
+            .background(Color.Black.copy(alpha = 0.76f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -555,8 +642,8 @@ private fun TvOsAppHubDialog(
     ) {
         Surface(
             shape = RoundedCornerShape(28.dp),
-            color = Color(0xF216181E),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+            color = Color(0xFA14171F),
+            border = BorderStroke(1.2.dp, Color.White.copy(alpha = 0.22f)),
             modifier = Modifier
                 .widthIn(max = 680.dp)
                 .fillMaxWidth()
@@ -569,7 +656,7 @@ private fun TvOsAppHubDialog(
         ) {
             LazyColumn(
                 contentPadding = PaddingValues(22.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
                     Row(
@@ -584,16 +671,33 @@ private fun TvOsAppHubDialog(
                                 color = Color.White
                             )
                             Text(
-                                text = "Substitui a loja antiga travada de fábrica por lojas que atualizam sempre.",
+                                text = "Use as setas ▲ ▼ do controle e aperte OK na loja desejada.",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Color.White.copy(alpha = 0.68f)
+                                color = Color.White.copy(alpha = 0.72f)
                             )
                         }
-                        IconButton(
+                        TvModalFocusableSurface(
                             onClick = onDismiss,
+                            shape = RoundedCornerShape(24.dp),
                             modifier = Modifier.testTag("close_apphub_button")
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Fechar", tint = Color.White)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Fechar",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Fechar",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -606,21 +710,26 @@ private fun TvOsAppHubDialog(
                     )
                 }
 
-                items(uiState.updateChannels, key = { it.id }) { channel ->
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = Color.White.copy(alpha = 0.07f),
-                        border = BorderStroke(0.8.dp, Color.White.copy(alpha = 0.12f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                items(
+                    items = uiState.updateChannels,
+                    key = { it.id }
+                ) { channel ->
+                    val isFirst = channel.id == uiState.updateChannels.firstOrNull()?.id
+                    TvModalFocusableSurface(
+                        onClick = { onOpenChannel(channel) },
+                        focusRequester = if (isFirst) firstStoreFocus else null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("apphub_channel_${channel.id}")
+                    ) { isFocused ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.padding(14.dp)
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            modifier = Modifier.padding(16.dp)
                         ) {
                             Column(
                                 modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -628,12 +737,14 @@ private fun TvOsAppHubDialog(
                                 ) {
                                     Text(
                                         text = channel.name,
-                                        style = MaterialTheme.typography.titleMedium,
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
                                         color = Color.White
                                     )
                                     if (channel.installedVersion != null) {
                                         Text(
-                                            text = "v${channel.installedVersion}",
+                                            text = "INSTALADO • v${channel.installedVersion}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = SignalEmerald
                                         )
@@ -642,34 +753,46 @@ private fun TvOsAppHubDialog(
                                 Text(
                                     text = channel.roleDescription,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Color.White.copy(alpha = 0.68f)
+                                    color = Color.White.copy(alpha = if (isFocused) 0.92f else 0.68f)
                                 )
                             }
 
-                            Button(
-                                onClick = { onOpenChannel(channel) },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (channel.installedVersion != null) {
-                                        SignalEmerald
-                                    } else {
-                                        Color(0xFF007AFF)
-                                    },
-                                    contentColor = Color.White
-                                ),
+                            Surface(
                                 shape = CircleShape,
-                                modifier = Modifier.testTag("apphub_channel_${channel.id}")
+                                color = if (channel.installedVersion != null) {
+                                    SignalEmerald
+                                } else {
+                                    Color(0xFF007AFF)
+                                },
+                                border = if (isFocused) {
+                                    BorderStroke(1.5.dp, Color.White)
+                                } else {
+                                    null
+                                }
                             ) {
-                                Icon(
-                                    imageVector = if (channel.installedVersion != null) {
-                                        Icons.Default.PlayArrow
-                                    } else {
-                                        Icons.Default.OpenInNew
-                                    },
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(if (channel.installedVersion != null) "Abrir" else "Obter")
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (channel.installedVersion != null) {
+                                            Icons.Default.PlayArrow
+                                        } else {
+                                            Icons.Default.OpenInNew
+                                        },
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = if (channel.installedVersion != null) "Abrir" else "Obter",
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                     }
@@ -686,17 +809,17 @@ private fun TvOsAppHubDialog(
 
                 items(MagcubicPresetCinemaApps.streamingDeck, key = { it.id }) { app ->
                     val ver = uiState.installedStreamingVersions[app.packageName]
-                    Surface(
+                    TvModalFocusableSurface(
+                        onClick = { onCheckPackageUpdate(app.packageName, app.title) },
                         shape = RoundedCornerShape(16.dp),
-                        color = Color.White.copy(alpha = 0.05f),
                         modifier = Modifier.fillMaxWidth()
-                    ) {
+                    ) { isFocused ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -707,31 +830,52 @@ private fun TvOsAppHubDialog(
                                 Text(
                                     text = if (ver != null) "Instalado: v$ver" else app.packageName,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(alpha = 0.58f)
+                                    color = Color.White.copy(alpha = if (isFocused) 0.85f else 0.58f)
                                 )
                             }
-                            FilledTonalButton(
-                                onClick = { onCheckPackageUpdate(app.packageName, app.title) },
-                                shape = CircleShape
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isFocused) Color(0xFF007AFF) else Color.White.copy(alpha = 0.14f)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.SystemUpdateAlt,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Atualizar")
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SystemUpdateAlt,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Atualizar",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                     }
                 }
 
                 item {
-                    FilledTonalButton(
+                    TvModalFocusableSurface(
                         onClick = onOpenNativeAppsSettings,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Desinstalar versão antiga de fábrica (caso dê conflito de assinatura)")
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 14.dp, horizontal = 16.dp)
+                        ) {
+                            Text(
+                                text = "Desinstalar versão antiga de fábrica (caso dê conflito de assinatura)",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -1096,13 +1240,21 @@ private fun TvOsControlCenterDrawer(
     onOpenFocusPattern: () -> Unit,
     onOpenContrastPattern: () -> Unit,
     onToggleHomeLauncher: (Boolean) -> Unit,
+    onOpenHomeSelector: () -> Unit,
     onOpenAndroidSettings: () -> Unit,
     onOpenTechnicalTools: (MainDestination) -> Unit
 ) {
+    val firstDrawerFocus = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        delay(80)
+        runCatching { firstDrawerFocus.requestFocus() }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.52f))
+            .background(Color.Black.copy(alpha = 0.64f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1111,13 +1263,13 @@ private fun TvOsControlCenterDrawer(
     ) {
         Surface(
             shape = RoundedCornerShape(28.dp),
-            color = Color(0xEE181A20),
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+            color = Color(0xFA181A22),
+            border = BorderStroke(1.2.dp, Color.White.copy(alpha = 0.22f)),
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .safeDrawingPadding()
                 .padding(16.dp)
-                .width(330.dp)
+                .width(344.dp)
                 .fillMaxHeight()
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -1144,11 +1296,24 @@ private fun TvOsControlCenterDrawer(
                             Text(
                                 text = "Central de Controle",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = Color.White.copy(alpha = 0.6f)
+                                color = Color.White.copy(alpha = 0.68f)
                             )
                         }
-                        IconButton(onClick = onDismiss) {
-                            Icon(Icons.Default.Close, contentDescription = "Fechar", tint = Color.White)
+                        TvModalFocusableSurface(
+                            onClick = onDismiss,
+                            shape = RoundedCornerShape(22.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(10.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Fechar",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -1159,7 +1324,30 @@ private fun TvOsControlCenterDrawer(
                         title = "App Store & Atualizações",
                         subtitle = "Baixar e atualizar apps sem bloqueio",
                         onClick = onOpenAppHub,
+                        focusRequester = firstDrawerFocus,
                         tag = "cc_open_apphub"
+                    )
+                }
+
+                item {
+                    ControlCenterTile(
+                        icon = Icons.Default.Home,
+                        title = "Botão Home Padrão",
+                        subtitle = if (uiState.isDefaultHomeApp) {
+                            "Ativo! O botão 🏠 abre sempre aqui"
+                        } else {
+                            "Toque OK p/ tornar sua Tela Inicial"
+                        },
+                        badgeText = if (uiState.isDefaultHomeApp) "ATIVO" else "DEFINIR",
+                        badgeColor = if (uiState.isDefaultHomeApp) SignalEmerald else Color(0xFF007AFF),
+                        onClick = {
+                            if (!uiState.isHomeLauncherEnabled) {
+                                onToggleHomeLauncher(true)
+                            } else {
+                                onOpenHomeSelector()
+                            }
+                        },
+                        tag = "cc_home_launcher"
                     )
                 }
 
@@ -1200,44 +1388,6 @@ private fun TvOsControlCenterDrawer(
                 }
 
                 item {
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = Color.White.copy(alpha = 0.08f),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Default.Home, contentDescription = null, tint = Color.White)
-                                Column {
-                                    Text(
-                                        text = "Botão Home Padrão",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = Color.White
-                                    )
-                                    Text(
-                                        text = "Abrir sempre nesta tela",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White.copy(alpha = 0.65f)
-                                    )
-                                }
-                            }
-                            Switch(
-                                checked = uiState.isHomeLauncherEnabled,
-                                onCheckedChange = onToggleHomeLauncher
-                            )
-                        }
-                    }
-                }
-
-                item {
                     ControlCenterTile(
                         icon = Icons.Default.Settings,
                         title = "Ajustes Nativos Android",
@@ -1267,18 +1417,18 @@ private fun ControlCenterTile(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    tag: String
+    tag: String,
+    focusRequester: FocusRequester? = null,
+    badgeText: String? = null,
+    badgeColor: Color = Color(0xFF007AFF)
 ) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = Color.White.copy(alpha = 0.09f),
+    TvModalFocusableSurface(
+        onClick = onClick,
+        focusRequester = focusRequester,
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .focusable()
-            .clickable(onClick = onClick)
             .testTag(tag)
-    ) {
+    ) { isFocused ->
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1289,7 +1439,7 @@ private fun ControlCenterTile(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.14f))
+                    .background(Color.White.copy(alpha = if (isFocused) 0.24f else 0.14f))
             ) {
                 Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
             }
@@ -1298,8 +1448,21 @@ private fun ControlCenterTile(
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.White.copy(alpha = 0.68f)
+                    color = Color.White.copy(alpha = if (isFocused) 0.90f else 0.68f)
                 )
+            }
+            if (badgeText != null) {
+                Surface(
+                    shape = CircleShape,
+                    color = badgeColor
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
             }
         }
     }
@@ -1313,19 +1476,16 @@ private fun ControlCenterCompactTile(
     modifier: Modifier = Modifier,
     tag: String
 ) {
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        color = Color.White.copy(alpha = 0.09f),
-        modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .focusable()
-            .clickable(onClick = onClick)
-            .testTag(tag)
+    TvModalFocusableSurface(
+        onClick = onClick,
+        modifier = modifier.testTag(tag)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(vertical = 14.dp, horizontal = 10.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 14.dp, horizontal = 10.dp)
         ) {
             Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
             Text(title, style = MaterialTheme.typography.labelMedium, color = Color.White)

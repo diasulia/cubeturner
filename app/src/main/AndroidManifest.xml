@@ -49,9 +49,11 @@
 
         <activity
             android:name=".MainActivity"
-            android:configChanges="orientation|screenSize|screenLayout|keyboard|keyboardHidden|navigation"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|touchscreen|uiMode|density|fontScale"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
             android:theme="@style/Theme.MyApplication">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -60,10 +62,10 @@
             </intent-filter>
         </activity>
 
-        <!-- Toggleable Home Launcher alias: disabled by default on smartphones, enabled on-demand on projectors -->
+        <!-- Home Launcher alias enabled so pressing the physical Home button can route directly to CubeTuner -->
         <activity-alias
             android:name=".ProjectorHomeAlias"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="true"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">

@@ -59,6 +59,8 @@ data class CubeTunerUiState(
     val colorWarmthPreview: Float = 0f,
     val installedApps: List<InstalledAppItem> = emptyList(),
     val isHomeLauncherEnabled: Boolean = false,
+    val isDefaultHomeApp: Boolean = false,
+    val homeResetNonce: Int = 0,
     val showAppHubModal: Boolean = false,
     val updateChannels: List<AppUpdateChannel> = defaultUpdateChannels(),
     val installedStreamingVersions: Map<String, String> = emptyMap()
@@ -168,6 +170,18 @@ class CubeTunerViewModel(
         _uiState.update { it.copy(colorWarmthPreview = value.coerceIn(0f, 0.45f)) }
     }
 
+    fun onPhysicalHomePressed() {
+        _uiState.update { state ->
+            state.copy(
+                currentTab = MainDestination.HOME,
+                showAppHubModal = false,
+                activeCalibrationPattern = null,
+                homeResetNonce = state.homeResetNonce + 1
+            )
+        }
+        refreshLocalDeviceStatus()
+    }
+
     fun refreshLocalDeviceStatus() {
         val ctx = getApplication<Application>()
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -177,6 +191,7 @@ class CubeTunerViewModel(
         val availMb = (memInfo.availMem / (1024L * 1024L)).toInt()
         val localIp = detectLocalIpv4(ctx)
         val aliasEnabled = isProjectorHomeAliasEnabled(ctx)
+        val defaultHome = isCurrentlyDefaultHome(ctx)
 
         _uiState.update { state ->
             state.copy(
@@ -184,6 +199,7 @@ class CubeTunerViewModel(
                 localTotalRamMb = totalMb,
                 localAvailableRamMb = availMb,
                 isHomeLauncherEnabled = aliasEnabled,
+                isDefaultHomeApp = defaultHome,
                 ipInput = if (state.ipInput.isBlank()) suggestSubnetPrefix(localIp) else state.ipInput
             )
         }
@@ -704,22 +720,60 @@ class CubeTunerViewModel(
             newState,
             PackageManager.DONT_KILL_APP
         )
+        if (enable) {
+            openDefaultHomeSelector()
+        } else {
+            refreshLocalDeviceStatus()
+            _uiState.update {
+                it.copy(statusBannerMessage = "Modo Launcher padrão desativado neste aparelho.")
+            }
+        }
+    }
+
+    fun openDefaultHomeSelector() {
+        val ctx = getApplication<Application>()
+        val alias = ComponentName(ctx, "com.example.ProjectorHomeAlias")
+        ctx.packageManager.setComponentEnabledSetting(
+            alias,
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+            PackageManager.DONT_KILL_APP
+        )
+        refreshLocalDeviceStatus()
+
+        val homeSettings = Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val openedHomeSettings = runCatching { ctx.startActivity(homeSettings) }.isSuccess
+        if (!openedHomeSettings) {
+            val defaultApps = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val openedDefaultApps = runCatching { ctx.startActivity(defaultApps) }.isSuccess
+            if (!openedDefaultApps) {
+                val homeChooser = Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_HOME)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                runCatching { ctx.startActivity(homeChooser) }
+            }
+        }
         _uiState.update {
             it.copy(
-                isHomeLauncherEnabled = enable,
-                statusBannerMessage = if (enable) {
-                    "Modo Launcher ativado! Pressione o botão Home (Casinha) do controle para escolher o CubeTuner."
-                } else {
-                    "Modo Launcher padrão desativado neste aparelho."
-                }
+                statusBannerMessage = "Selecione 'CubeTuner' como App de Início (Home) padrão!"
             )
         }
     }
 
     private fun isProjectorHomeAliasEnabled(context: Context): Boolean {
         val alias = ComponentName(context, "com.example.ProjectorHomeAlias")
-        return context.packageManager.getComponentEnabledSetting(alias) ==
-            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        val state = context.packageManager.getComponentEnabledSetting(alias)
+        return state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED ||
+            state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT
+    }
+
+    private fun isCurrentlyDefaultHome(context: Context): Boolean {
+        val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        val resolved = context.packageManager.resolveActivity(
+            homeIntent,
+            PackageManager.MATCH_DEFAULT_ONLY
+        )
+        return resolved?.activityInfo?.packageName == context.packageName
     }
 
     private fun appendLog(entry: String) {

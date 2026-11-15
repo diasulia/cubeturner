@@ -1,10 +1,12 @@
 package com.example
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -50,11 +52,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.CubeTunerUiState
 import com.example.ui.CubeTunerViewModel
 import com.example.ui.MainDestination
@@ -68,22 +66,33 @@ import com.example.ui.theme.CubeTunerTheme
 import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
+    private val vm: CubeTunerViewModel by viewModels {
+        CubeTunerViewModel.provideFactory(application)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        WindowCompat.getInsetsController(window, window.decorView).apply {
-            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            hide(WindowInsetsCompat.Type.navigationBars())
-        }
         setContent {
             CubeTunerTheme {
-                val vm: CubeTunerViewModel = viewModel(
-                    factory = CubeTunerViewModel.provideFactory(application)
-                )
                 val uiState by vm.uiState.collectAsStateWithLifecycle()
                 CubeTunerApp(uiState = uiState, viewModel = vm)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.hasCategory(Intent.CATEGORY_HOME) || intent.action == Intent.ACTION_MAIN) {
+            vm.onPhysicalHomePressed()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        vm.refreshLocalDeviceStatus()
+        vm.refreshAppHubVersions()
     }
 }
 
@@ -171,6 +180,7 @@ fun CubeTunerApp(
                 onCleanLocalRam = viewModel::cleanLocalRamNow,
                 onOpenCalibration = viewModel::openCalibrationPattern,
                 onToggleDefaultLauncher = viewModel::toggleHomeLauncherMode,
+                onOpenHomeSelector = viewModel::openDefaultHomeSelector,
                 onOpenHiddenSettings = viewModel::openHiddenAndroidSettings,
                 onOpenTechnicalPage = viewModel::selectTab,
                 onDismissAppHub = { viewModel.setShowAppHubModal(false) },
