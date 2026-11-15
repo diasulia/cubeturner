@@ -16,4 +16,5 @@
     <string name="visual_title">Calibração Óptica e Tela</string>
     <string name="control_title">Controle Wi-Fi e Launcher</string>
     <string name="exit_pattern_hint">Toque na tela ou pressione Voltar no controle para sair</string>
+    <string name="home_interceptor_desc">Redireciona o botão Home do projetor para a tela inicial estilo Apple TV do CubeTuner mantendo o sistema original intacto.</string>
 </resources>

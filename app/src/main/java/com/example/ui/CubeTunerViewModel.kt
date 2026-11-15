@@ -24,6 +24,7 @@ import com.example.data.InstalledAppItem
 import com.example.data.MagcubicKnownBloatware
 import com.example.data.MagcubicPresetCinemaApps
 import com.example.data.ProjectorTelemetry
+import com.example.service.CubeHomeOverridePrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -738,24 +739,34 @@ class CubeTunerViewModel(
             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
             PackageManager.DONT_KILL_APP
         )
-        refreshLocalDeviceStatus()
 
-        val homeSettings = Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        val openedHomeSettings = runCatching { ctx.startActivity(homeSettings) }.isSuccess
-        if (!openedHomeSettings) {
-            val defaultApps = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            val openedDefaultApps = runCatching { ctx.startActivity(defaultApps) }.isSuccess
-            if (!openedDefaultApps) {
-                val homeChooser = Intent(Intent.ACTION_MAIN)
-                    .addCategory(Intent.CATEGORY_HOME)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                runCatching { ctx.startActivity(homeChooser) }
+        if (CubeHomeOverridePrefs.isAccessibilityServiceActive(ctx)) {
+            val next = !CubeHomeOverridePrefs.isEnabled(ctx)
+            CubeHomeOverridePrefs.setEnabled(ctx, next)
+            refreshLocalDeviceStatus()
+            _uiState.update {
+                it.copy(
+                    statusBannerMessage = if (next) {
+                        "Botão Home Apple TV ativado!"
+                    } else {
+                        "Redirecionamento do Botão Home pausado temporariamente."
+                    }
+                )
             }
+            return
         }
+
+        CubeHomeOverridePrefs.setEnabled(ctx, true)
+        val accIntent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val openedAcc = runCatching { ctx.startActivity(accIntent) }.isSuccess
+        if (!openedAcc) {
+            val homeSettings = Intent(Settings.ACTION_HOME_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching { ctx.startActivity(homeSettings) }
+        }
+        refreshLocalDeviceStatus()
         _uiState.update {
             it.copy(
-                statusBannerMessage = "Selecione 'CubeTuner' como App de Início (Home) padrão!"
+                statusBannerMessage = "Ative 'CubeTuner' em Acessibilidade (ou via comando ADB no Windows) para assumir o botão Home!"
             )
         }
     }
@@ -768,6 +779,11 @@ class CubeTunerViewModel(
     }
 
     private fun isCurrentlyDefaultHome(context: Context): Boolean {
+        if (CubeHomeOverridePrefs.isAccessibilityServiceActive(context) &&
+            CubeHomeOverridePrefs.isEnabled(context)
+        ) {
+            return true
+        }
         val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
         val resolved = context.packageManager.resolveActivity(
             homeIntent,
