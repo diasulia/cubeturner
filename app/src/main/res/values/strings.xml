@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">CubeTuner</string>
+    <string name="nav_home">Cinema</string>
+    <string name="nav_connect">Conectar</string>
+    <string name="nav_turbo">Turbo</string>
+    <string name="nav_visual">Visual</string>
+    <string name="nav_control">Controle</string>
+    <string name="hero_banner_desc">Ilustração do projetor cúbico com grade óptica de calibração</string>
+    <string name="connect_title">Ponte Wi-Fi ADB</string>
+    <string name="connect_subtitle">Conecte seu celular Android ao IP do Magcubic na porta 5555 ou instale este APK direto no projetor.</string>
+    <string name="btn_connect">Conectar ao Projetor</string>
+    <string name="btn_disconnect">Desconectar</string>
+    <string name="ip_label">IP do Projetor (Wi-Fi)</string>
+    <string name="port_label">Porta ADB</string>
+    <string name="turbo_title">Otimização de Processamento</string>
+    <string name="visual_title">Calibração Óptica e Tela</string>
+    <string name="control_title">Controle Wi-Fi e Launcher</string>
+    <string name="exit_pattern_hint">Toque na tela ou pressione Voltar no controle para sair</string>
+</resources>
